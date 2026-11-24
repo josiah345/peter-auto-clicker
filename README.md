@@ -44,4 +44,6 @@ Hover over any icon in the app for a tip.
 
 ---
 
+Free and open source under the [MIT License](LICENSE). Built with Go ([notices](THIRD_PARTY_NOTICES.txt)).
+
 For developers: see [BUILDING.md](BUILDING.md).

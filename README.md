@@ -42,12 +42,6 @@ Hover over any icon in the app for a tip.
 - Games that move the camera with the mouse often ignore replayed movement.
 - Settings and your last recording are stored in `%APPDATA%\PeterAutoClicker`.
 
-## Build from source
+---
 
-Requires Go 1.21+. The app is pure Win32 and has no dependencies.
-
-```
-GOOS=windows GOARCH=amd64 go build -ldflags "-H windowsgui -s -w" -o PeterAutoClicker.exe .
-```
-
-`rsrc_windows_amd64.syso` holds the icon and manifest. To regenerate it: `rsrc -manifest app.manifest -ico icon.ico -arch amd64 -o rsrc_windows_amd64.syso`
+For developers: see [BUILDING.md](BUILDING.md).

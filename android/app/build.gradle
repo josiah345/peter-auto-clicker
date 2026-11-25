@@ -1,0 +1,47 @@
+plugins {
+    id 'com.android.application'
+}
+
+android {
+    namespace 'com.josiah345.peterautoclicker'
+    compileSdk 34
+
+    defaultConfig {
+        applicationId 'com.josiah345.peterautoclicker'
+        minSdk 26
+        targetSdk 34
+        versionCode 1
+        versionName '1.0'
+    }
+
+    // The permanent signing key is supplied by GitHub secrets (never stored in the repo).
+    // Without it, builds fall back to a temporary debug key (fine for testing).
+    def ks = file('release.jks')
+    signingConfigs {
+        release {
+            if (ks.exists()) {
+                storeFile ks
+                storePassword System.getenv('KS_PASS')
+                keyAlias System.getenv('KEY_ALIAS')
+                keyPassword System.getenv('KEY_PASS')
+            }
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            signingConfig ks.exists() ? signingConfigs.release : signingConfigs.debug
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    lint {
+        abortOnError false
+        checkReleaseBuilds false
+    }
+}

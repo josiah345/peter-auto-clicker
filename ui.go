@@ -14,13 +14,16 @@ import (
 )
 
 const (
-	appVersion = "1.1"
+	appVersion = "1.2"
 	repoURL    = "https://github.com/josiah345/peter-auto-clicker"
 	logoInner  = 74
 )
 
 var (
 	pShellExecuteW  = shell32.NewProc("ShellExecuteW")
+	pSetTimer       = user32.NewProc("SetTimer")
+	pKillTimer      = user32.NewProc("KillTimer")
+	pGetTickCount64 = kernel32.NewProc("GetTickCount64")
 	pSetCursor      = user32.NewProc("SetCursor")
 	pScreenToClient = user32.NewProc("ScreenToClient")
 	pSetFocus       = user32.NewProc("SetFocus")
@@ -103,7 +106,7 @@ func paintBackdrop(p *painter, clip rect, w, h int32) {
 		gpDeleteBrush.Call(b)
 	}
 	// light rays fanning down from above the window
-	rayCol := A(10, 255, 255, 255)
+	rayCol := A(6, 255, 255, 255)
 	if !darkMode {
 		rayCol = A(26, 255, 236, 180)
 	}
@@ -149,9 +152,10 @@ func paintBackdrop(p *painter, clip rect, w, h int32) {
 		if x+r < clip.L || x-r > clip.R || y+r < clip.T || y-r > clip.B {
 			continue
 		}
-		c := A(s.a, 255, 255, 255)
+		a := uint8(int(s.a) * 3 / 5) // softer sparkles
+		c := A(a, 255, 255, 255)
 		if s.gold {
-			c = gold1.withA(s.a)
+			c = gold1.withA(a)
 		}
 		if !darkMode {
 			c = gold2.withA(s.a / 2)
@@ -207,6 +211,7 @@ func (p *painter) field(r rect) {
 // paintScene draws everything in the main window that is not a control.
 func paintScene(p *painter, clip rect) {
 	pl := pal()
+	gpSetClipRectI.Call(p.g, i32(clip.L), i32(clip.T), i32(clip.R-clip.L), i32(clip.B-clip.T), 0) // skip work outside
 	W, H := sc(winW), sc(winH)
 	paintBackdrop(p, clip, W, H)
 	headerBand(p, clip, W, lyHeader.r())
@@ -227,11 +232,21 @@ func paintScene(p *painter, clip rect) {
 	if sr := lyStatus.r(); hit(sr, clip) {
 		p.card(sr)
 		dot := statusDot()
-		dr := rect{sr.L + sc(16), sr.T + sc(13), sr.L + sc(26), sr.T + sc(23)}
-		p.glow(dr, sc(5), dot, int(sc(4)))
-		p.fillRound(dr, sc(5), dot, dot)
+		cx, cy := sr.L+sc(21), sr.T+sc(18)
+		rad := sc(5)
+		glowA := uint8(255)
+		if state != stIdle { // gentle pulse: 1.2 s cycle
+			ph := (1 + math.Sin(float64(animTick())/1200*2*math.Pi)) / 2
+			rad += int32(ph * float64(sc(2)))
+			glowA = uint8(90 + ph*165)
+		}
+		dr := rect{cx - rad, cy - rad, cx + rad, cy + rad}
+		p.glow(dr, rad, dot.withA(glowA), int(sc(5)))
+		p.fillRound(dr, rad, dot, dot)
 		p.icon("timer", rect{sr.L + sc(16), sr.T + sc(33), sr.L + sc(30), sr.T + sc(47)}, pl.muted)
-		p.icon("clicks", rect{sr.L + sc(104), sr.T + sc(33), sr.L + sc(118), sr.T + sc(47)}, pl.muted)
+		if cur != nil && len(cur.Ev) > 0 { // the click count only makes sense with a recording
+			p.icon("clicks", rect{sr.L + sc(104), sr.T + sc(33), sr.L + sc(118), sr.T + sc(47)}, pl.muted)
+		}
 	}
 
 	for _, c := range []struct {
@@ -299,19 +314,22 @@ func capText(p *painter, s string, r rect) {
 
 func footerLinkRect() rect {
 	f := lyFooter.r()
-	return rect{f.L + sc(winW/2-20), f.T, f.R - sc(60), f.B}
+	return rect{sc(250), f.T, sc(winW - 16), f.B}
 }
 
-func paintMain(hdc uintptr) {
+func paintMain(hdc uintptr, clip rect) {
 	var cr rect
 	pGetClientRect.Call(hwndMain, uintptr(unsafe.Pointer(&cr)))
 	w, h := cr.R, cr.B
+	if clip.R <= clip.L || clip.B <= clip.T {
+		clip = cr
+	}
 	mem, _, _ := pCreateCompatibleDC.Call(hdc)
 	bmp, _, _ := pCreateCompatibleBmp.Call(hdc, uintptr(w), uintptr(h))
 	old, _, _ := pSelectObject.Call(mem, bmp)
 
 	p := newPainter(mem)
-	paintScene(p, cr)
+	paintScene(p, clip)
 	pl := pal()
 
 	// header text
@@ -325,7 +343,11 @@ func paintMain(hdc uintptr) {
 	sr := lyStatus.r()
 	p.text(statusText, rect{sr.L + sc(34), sr.T + sc(5), sr.R - sc(12), sr.T + sc(29)}, fStatus, pl.text, 0x20|0x4|0x8000) // END_ELLIPSIS
 	t1, t2 := infoTexts()
-	p.text(t1, rect{sr.L + sc(35), sr.T + sc(32), sr.L + sc(100), sr.T + sc(48)}, fInfo, pl.muted, 0x20|0x4)
+	t1R := sr.L + sc(100)
+	if t2 == "" {
+		t1R = sr.R - sc(12) // no click count: let the text use the whole line
+	}
+	p.text(t1, rect{sr.L + sc(35), sr.T + sc(32), t1R, sr.T + sc(48)}, fInfo, pl.muted, 0x20|0x4)
 	p.text(t2, rect{sr.L + sc(123), sr.T + sc(32), sr.R - sc(12), sr.T + sc(48)}, fInfo, pl.muted, 0x20|0x4)
 
 	// cell captions + units
@@ -361,7 +383,7 @@ func paintMain(hdc uintptr) {
 	p.text("Official page on GitHub", rect{lr.L, lr.T, f.R - sc(16), lr.B}, fFoot, linkCol, 0x2|0x20|0x4) // right-aligned
 
 	p.finish(mem)
-	pBitBlt.Call(hdc, 0, 0, uintptr(w), uintptr(h), mem, 0, 0, 0xCC0020)
+	pBitBlt.Call(hdc, uintptr(clip.L), uintptr(clip.T), uintptr(clip.R-clip.L), uintptr(clip.B-clip.T), mem, uintptr(clip.L), uintptr(clip.T), 0xCC0020)
 	pSelectObject.Call(mem, old)
 	pDeleteObject.Call(bmp)
 	pDeleteDC.Call(mem)
@@ -402,7 +424,10 @@ const (
 )
 
 type btnInfo struct {
+	id           int
 	pad          int
+	danger       bool   // Delete: glows red on hover
+	desc         string // second line (settings switch rows)
 	role         int
 	icon, iconOn string
 	key          int // hotkey index for gem badges (-1 = none)
@@ -440,6 +465,7 @@ func drawButton(d *drawItemStruct) {
 	gpTranslate.Call(p.g, f32(float32(-bi.pos.L)), f32(float32(-bi.pos.T)), 0)
 	bi.scene(p, bi.pos)
 	gpResetTransform.Call(p.g)
+	gpResetClip.Call(p.g)
 
 	pressed := d.ItemState&0x1 != 0
 	disabled := d.ItemState&0x4 != 0
@@ -580,7 +606,12 @@ func drawButton(d *drawItemStruct) {
 		}
 		p.strokeRound(vr, rad, bc, float32(sc(3))/2)
 		p.icon(icon, iconRect(vr.L+sc(26), cy, sc(20)), pl.icon)
-		p.text(bi.label, rect{vr.L + sc(46), vr.T, vr.R - sc(70), vr.B}, fTile, pl.text, 0x20|0x4)
+		if bi.desc == "" {
+			p.text(bi.label, rect{vr.L + sc(46), vr.T, vr.R - sc(70), vr.B}, fTile, pl.text, 0x20|0x4)
+		} else {
+			p.text(bi.label, rect{vr.L + sc(46), vr.T + sc(8), vr.R - sc(70), cy + sc(1)}, fTile, pl.text, 0x20|0x8)
+			p.text(bi.desc, rect{vr.L + sc(46), cy + sc(3), vr.R - sc(70), vr.B - sc(6)}, fInfo, pl.muted, 0x20)
+		}
 		// the switch
 		tw, th := sc(42), sc(22)
 		tr := rect{vr.R - sc(14) - tw, cy - th/2, vr.R - sc(14), cy - th/2 + th}
@@ -601,8 +632,12 @@ func drawButton(d *drawItemStruct) {
 		if bi.role == roleChip {
 			rad = sc(7)
 		}
+		hoverCol := gold1
+		if bi.danger {
+			hoverCol = A(255, 236, 72, 72)
+		}
 		if hover {
-			p.glow(vr, rad, gold1.withA(170), int(in))
+			p.glow(vr, rad, hoverCol.withA(170), int(in))
 		}
 		var fg argb
 		if on || bi.role == roleGold {
@@ -625,10 +660,16 @@ func drawButton(d *drawItemStruct) {
 			p.fillRound(vr, rad, c1, c2)
 			bc := pl.border
 			if hover {
-				bc = gold1
+				bc = hoverCol
 			}
 			p.strokeRound(vr, rad, bc, float32(sc(3))/2)
 			fg = pl.icon
+			if hover && bi.danger {
+				fg = A(255, 255, 120, 120)
+				if !darkMode {
+					fg = A(255, 200, 40, 40)
+				}
+			}
 		}
 		if disabled {
 			fg = pl.muted.withA(140)
@@ -656,6 +697,11 @@ func drawButton(d *drawItemStruct) {
 		}
 	}
 
+	if d.ItemState&0x10 != 0 && d.ItemState&0x200 == 0 && !disabled { // ODS_FOCUS, not ODS_NOFOCUSRECT
+		fr := rect{vr.L + 1, vr.T + 1, vr.R - 1, vr.B - 1}
+		p.strokeRound(fr, sc(12), A(255, 120, 180, 255), float32(sc(2)))
+	}
+
 	p.finish(mem)
 	pBitBlt.Call(d.Hdc, 0, 0, uintptr(w), uintptr(h), mem, 0, 0, 0xCC0020)
 	pSelectObject.Call(mem, old)
@@ -670,6 +716,43 @@ func textWidth(hdc, font uintptr, s string) int32 {
 	pGetTextExtent.Call(hdc, uintptr(unsafe.Pointer(&u[0])), uintptr(len(u)-1), uintptr(unsafe.Pointer(&sz)))
 	pSelectObject.Call(hdc, old)
 	return sz.cx
+}
+
+// pressSounded marks buttons whose sound already played on mouse-down,
+// so the click that follows doesn't play it a second time.
+var pressSounded = map[uintptr]bool{}
+
+func soundFor(h uintptr) *sound {
+	bi := btns[h]
+	if bi == nil {
+		return nil
+	}
+	switch bi.id {
+	case idRecord:
+		if state == stRecording {
+			return sndFinish
+		}
+		return sndRec
+	case idPlay:
+		return sndPlay
+	case idStop:
+		return sndStop
+	case idInf, idPrecise, idSmart, idAutoStop, idHide, idDark, idPin:
+		return sndToggle
+	case idGear, idSave, idLoad, idClear, idReset, idCancel:
+		return sndTick
+	}
+	return nil
+}
+
+// clickSound plays s for a button click unless it already played on mouse-down
+// (keyboard Space/Enter clicks still get their sound here).
+func clickSound(ctl uintptr, s *sound) {
+	if pressSounded[ctl] {
+		pressSounded[ctl] = false
+		return
+	}
+	play(s)
 }
 
 // hover tracking + key capture via subclassing
@@ -693,6 +776,13 @@ var subclassCB = syscall.NewCallback(func(hwnd, msg, wp, lp, id, ref uintptr) ui
 		pInvalidateRect.Call(hwnd, 0, 0)
 	case 0x0014: // WM_ERASEBKGND
 		return 1
+	case 0x0201: // WM_LBUTTONDOWN: click sound the moment you press
+		if r, _, _ := pIsWindowEnabled.Call(hwnd); r != 0 {
+			if s := soundFor(hwnd); s != nil {
+				play(s)
+				pressSounded[hwnd] = true
+			}
+		}
 	case 0x0087: // WM_GETDLGCODE
 		if capturing == hwnd {
 			return 0x4 // DLGC_WANTALLKEYS
@@ -729,7 +819,7 @@ func mkButtonIn(parent uintptr, scene func(*painter, rect), b box, id int, role 
 		uintptr(wsChild|wsVisible|wsTabStop|0xB), // BS_OWNERDRAW
 		uintptr(sc(x)), uintptr(sc(y)), uintptr(sc(x+w)-sc(x)), uintptr(sc(y+h)-sc(y)),
 		parent, uintptr(id), hInst, 0)
-	btns[hw] = &btnInfo{pad: pad, role: role, icon: icon, key: -1, label: label,
+	btns[hw] = &btnInfo{id: id, pad: pad, role: role, icon: icon, key: -1, label: label,
 		pos: rect{sc(x), sc(y), sc(x + w), sc(y + h)}, scene: scene}
 	pSetWindowSubcls.Call(hw, subclassCB, 1, 0)
 	addTip(parent, hw, tip)
@@ -872,7 +962,23 @@ func setStatus(s string, kind int) {
 
 func refreshInfo() { invalidateBox(lyStatus) }
 
+// statusLightRect is the small area repainted by the pulse timer.
+func statusLightRect() rect {
+	sr := lyStatus.r()
+	return rect{sr.L + sc(6), sr.T + sc(4), sr.L + sc(36), sr.T + sc(32)}
+}
+
+func animTick() int64 {
+	t, _, _ := pGetTickCount64.Call()
+	return int64(t)
+}
+
 func setBusy(busy bool) {
+	if busy {
+		pSetTimer.Call(hwndMain, 7, 90, 0) // pulse the status light
+	} else {
+		pKillTimer.Call(hwndMain, 7)
+	}
 	for _, h := range allInputs {
 		enable(h, !busy)
 	}
@@ -962,10 +1068,17 @@ func wndProc(hwnd, msg, wParam, lParam uintptr) uintptr {
 	case 0x0014: // WM_ERASEBKGND
 		return 1
 
+	case 0x0113: // WM_TIMER: pulse animation (tiny area only)
+		if wParam == 7 {
+			r := statusLightRect()
+			pInvalidateRect.Call(hwndMain, uintptr(unsafe.Pointer(&r)), 0)
+		}
+		return 0
+
 	case wmPaint:
 		var ps paintStruct
 		hdc, _, _ := pBeginPaint.Call(hwnd, uintptr(unsafe.Pointer(&ps)))
-		paintMain(hdc)
+		paintMain(hdc, ps.RcPaint)
 		pEndPaint.Call(hwnd, uintptr(unsafe.Pointer(&ps)))
 		return 0
 
@@ -1030,40 +1143,40 @@ func wndProc(hwnd, msg, wParam, lParam uintptr) uintptr {
 		switch id {
 		case idRecord:
 			if state == stRecording {
-				play(sndFinish)
+				clickSound(lParam, sndFinish)
 				stopRecording(true)
 			} else {
-				play(sndRec)
+				clickSound(lParam, sndRec)
 				startRecording()
 			}
 		case idPlay:
-			play(sndPlay)
+			clickSound(lParam, sndPlay)
 			startPlaying()
 		case idStop:
-			play(sndStop)
+			clickSound(lParam, sndStop)
 			stopAll(true)
 		case idInf:
-			play(sndToggle)
+			clickSound(lParam, sndToggle)
 			setCheck(hInf, !isChecked(hInf))
 			enable(hEditCount, !isChecked(hInf))
 		case idPrecise, idSmart:
-			play(sndToggle)
+			clickSound(lParam, sndToggle)
 			setCheck(hPrecise, id == idPrecise)
 			setCheck(hSmart, id == idSmart)
 		case idAutoStop:
-			play(sndToggle)
+			clickSound(lParam, sndToggle)
 			setCheck(hAutoStop, !isChecked(hAutoStop))
 		case idHide:
-			play(sndToggle)
+			clickSound(lParam, sndToggle)
 			setCheck(hHide, !isChecked(hHide))
 		case idDark:
-			play(sndToggle)
+			clickSound(lParam, sndToggle)
 			darkMode = !darkMode
 			setCheck(hDark, darkMode)
 			saveSettings()
 			applyTheme()
 		case idPin:
-			play(sndToggle)
+			clickSound(lParam, sndToggle)
 			setCheck(hPin, !isChecked(hPin))
 			after := ^uintptr(1) // HWND_NOTOPMOST
 			if isChecked(hPin) {
@@ -1071,10 +1184,10 @@ func wndProc(hwnd, msg, wParam, lParam uintptr) uintptr {
 			}
 			pSetWindowPos.Call(hwndMain, after, 0, 0, 0, 0, 0x1|0x2|0x10)
 		case idGear:
-			play(sndTick)
+			clickSound(lParam, sndTick)
 			openSettings()
 		case idSave:
-			play(sndTick)
+			clickSound(lParam, sndTick)
 			if cur == nil || len(cur.Ev) == 0 {
 				setStatus("Record something first", cOrange)
 				break
@@ -1087,7 +1200,7 @@ func wndProc(hwnd, msg, wParam, lParam uintptr) uintptr {
 				}
 			}
 		case idLoad:
-			play(sndTick)
+			clickSound(lParam, sndTick)
 			if path := fileDialog(false); path != "" {
 				r, err := loadRecording(path)
 				if err != nil {
@@ -1100,7 +1213,7 @@ func wndProc(hwnd, msg, wParam, lParam uintptr) uintptr {
 				setStatus("Loaded. Press Play to replay", cGreen)
 			}
 		case idClear:
-			play(sndTick)
+			clickSound(lParam, sndTick)
 			if cur == nil || len(cur.Ev) == 0 {
 				break
 			}
@@ -1199,6 +1312,7 @@ func wndProc(hwnd, msg, wParam, lParam uintptr) uintptr {
 		return 0
 
 	case wmDestroy:
+		closeAudio()
 		removeHook()
 		unregisterHotkeys()
 		pPostQuitMessage.Call(0)
@@ -1247,6 +1361,7 @@ func buildControls() {
 	hSave = mkButton(lySave, idSave, roleStack, "save", "Save", "Save this recording to a file")
 	hLoad = mkButton(lyLoad, idLoad, roleStack, "open", "Open", "Open a saved recording")
 	hClear = mkButton(lyClear, idClear, roleStack, "trash", "Delete", "Delete this recording")
+	btns[hClear].danger = true
 
 	toggled[hPrecise] = true
 	toggled[hAutoStop] = true
@@ -1286,6 +1401,7 @@ func main() {
 	gpStartup.Call(uintptr(unsafe.Pointer(&token)), uintptr(unsafe.Pointer(&in)), 0)
 
 	loadSettings()
+	initAudio()
 	loadIcons()
 	loadLogo()
 	makeSparks()
@@ -1359,3 +1475,5 @@ func main() {
 	}
 	stopFlag.Store(true)
 }
+
+var pIsWindowEnabled = user32.NewProc("IsWindowEnabled")

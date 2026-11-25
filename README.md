@@ -6,7 +6,7 @@ A free Windows mouse recorder and auto clicker. It records the exact path and pa
 
 ## Download
 
-Get **PeterAutoClicker-v1.1.zip** from the [latest release](../../releases/latest), unzip it, then run `PeterAutoClicker.exe`.
+Get **PeterAutoClicker-v1.2.zip** from the [latest release](../../releases/latest), unzip it, then run `PeterAutoClicker.exe`.
 Nothing to install, and it works fully offline.
 
 > The first time you open it, Windows may say *"Windows protected your PC"* because the app is new and not code-signed. Click **More info**, then **Run anyway**.

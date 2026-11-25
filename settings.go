@@ -132,7 +132,7 @@ func saveSettings() {
 
 const (
 	setW = 360
-	setH = 394
+	setH = 418
 )
 
 var (
@@ -149,11 +149,11 @@ var (
 	settingsHint             = ""
 	settingsHintWarn         = false
 
-	sySound  = box{16, 234, 328, 44}
-	syCount  = box{16, 286, 328, 44}
-	syReset  = box{16, 342, 100, 36}
-	syCancel = box{128, 342, 100, 36}
-	sySave   = box{240, 342, 104, 36}
+	sySound  = box{16, 234, 328, 56}
+	syCount  = box{16, 298, 328, 56}
+	syReset  = box{16, 368, 100, 36}
+	syCancel = box{128, 368, 100, 36}
+	sySave   = box{240, 368, 104, 36}
 	syCard   = box{16, 62, 328, 160}
 )
 
@@ -325,12 +325,12 @@ func settingsProc(hwnd, msg, wParam, lParam uintptr) uintptr {
 			}
 			refreshSettingsButtons()
 		case idReset:
-			play(sndTick)
+			clickSound(lParam, sndTick)
 			tmpHK = defaultHK
 			setHint("Back to F6 / F7 / F8. Press Save to keep it.", false)
 			refreshSettingsButtons()
 		case idCancel:
-			play(sndTick)
+			clickSound(lParam, sndTick)
 			closeSettings(false)
 		case idSaveSet:
 			saveSettingsWindow()
@@ -426,8 +426,10 @@ func openSettings() {
 	for i := range keyBtns {
 		keyBtns[i] = mk(syKey(i), idKey0+i, roleKey, "", keyName(tmpHK[i]), "Click, then press the key you want")
 	}
-	hSoundBtn = mk(sySound, idSound, roleSwitchRow, "vol", "Click sounds", "Play a short sound when you press a button")
-	hCountBtn = mk(syCount, idCount, roleSwitchRow, "timer", "Countdown (3 seconds)", "Gives you time to click into your game before playback starts")
+	hSoundBtn = mk(sySound, idSound, roleSwitchRow, "vol", "Click sounds", "")
+	hCountBtn = mk(syCount, idCount, roleSwitchRow, "timer", "Countdown (3 seconds)", "")
+	btns[hSoundBtn].desc = "A short sound when you press a button"
+	btns[hCountBtn].desc = "Time to click into your game before it plays"
 	mk(syReset, idReset, roleTile, "", "Reset", "Go back to F6 / F7 / F8")
 	mk(syCancel, idCancel, roleTile, "", "Cancel", "")
 	mk(sySave, idSaveSet, roleGold, "", "Save", "")

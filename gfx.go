@@ -52,6 +52,7 @@ var (
 	gpDrawImageRectI   = gdiplus.NewProc("GdipDrawImageRectI")
 	gpSetClipPath      = gdiplus.NewProc("GdipSetClipPath")
 	gpResetClip        = gdiplus.NewProc("GdipResetClip")
+	gpSetClipRectI     = gdiplus.NewProc("GdipSetClipRectI")
 	gpPathGradFromPath = gdiplus.NewProc("GdipCreatePathGradientFromPath")
 	gpPathGradCenter   = gdiplus.NewProc("GdipSetPathGradientCenterColor")
 	gpPathGradSurround = gdiplus.NewProc("GdipSetPathGradientSurroundColorsWithCount")
@@ -110,7 +111,7 @@ var (
 	navy  = A(255, 20, 28, 56)
 
 	darkPal = palette{
-		bg1: A(255, 16, 28, 62), bg2: A(255, 6, 10, 26), glow: A(80, 52, 92, 210), line: A(9, 255, 255, 255),
+		bg1: A(255, 16, 28, 62), bg2: A(255, 6, 10, 26), glow: A(80, 52, 92, 210), line: A(6, 255, 255, 255),
 		head1: A(255, 10, 18, 44), head2: A(255, 18, 32, 72), card1: A(255, 30, 44, 88), card2: A(255, 19, 30, 66),
 		border: A(150, 214, 172, 82), field: A(255, 9, 15, 36), fieldB: A(255, 70, 86, 130),
 		text: A(255, 243, 233, 204), muted: A(255, 150, 166, 204), icon: A(255, 232, 214, 165),
